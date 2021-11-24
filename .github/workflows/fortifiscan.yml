@@ -1,0 +1,58 @@
+.on: 
+  push: 
+    branches:
+      - '**'
+
+name: CI
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps: 
+      - name: Check-out source code
+        uses: actions/checkout@v2
+    
+      - name: Prepare GitHub release
+        id: create_prod_release
+        uses: GoogleCloudPlatform/release-please-action@v2
+        if: github.ref == 'refs/heads/main'
+        with:
+          command: github-release
+          release-type: simple
+          package-name: ${{ github.event.repository.name }}
+          
+      - name: tag major and minor versions
+        if: ${{ steps.create_prod_release.outputs.release_created }}
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 8635138+rsenden@users.noreply.github.com
+          git remote add gh-token "https://${{ secrets.GITHUB_TOKEN }}@github.com/fortify/FortifyToolsInstaller.git"
+          major=${{ steps.create_prod_release.outputs.major }}
+          minor=${{ steps.create_prod_release.outputs.minor }}
+          patch=${{ steps.create_prod_release.outputs.patch }}
+          fullVersion="v${major}.${minor}.${patch}"
+          
+          for tag in "v${major}.${minor}" "v${major}" "latest"; do
+            git tag -d "$tag" || true 2>/dev/null
+            git push origin :${tag} || true 2>/dev/null
+            git tag -a "${tag}" -m "Release ${fullVersion}"
+            git push origin "${tag}"
+          done
+          
+      - name: Define build properties
+        run: |
+          echo DO_RELEASE=${{ steps.create_prod_release.outputs.release_created || false }} >> $GITHUB_ENV
+          
+      - name: Test help
+        run: ./FortifyToolsInstaller.sh --help
+        
+      - name: Test tool installation
+        run: |
+            FTI_TOOLS=FU:v5.2.1 source ./FortifyToolsInstaller.sh && [ -x "$(which FoDUpload)" ]
+          
+      - name: Prepare release PR
+        uses: GoogleCloudPlatform/release-please-action@v2
+        if: github.ref == 'refs/heads/main'
+        with:
+          command: release-pr
+          release-type: simple
+          package-name: ${{ github.event.repository.name }}
